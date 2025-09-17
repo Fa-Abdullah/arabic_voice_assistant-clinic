@@ -41,7 +41,7 @@ class OnlineArabicVoiceAssistant:
     def __init__(self):
         self.openai_client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
-            api_key="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"
+            api_key="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"
         )
         self.system_prompt = """أنت ساندي، موظفة استقبال في عيادة فانكوفر لطب الأسنان.
 

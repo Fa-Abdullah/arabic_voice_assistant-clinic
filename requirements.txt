@@ -9,3 +9,4 @@ vosk
 av
 openai-whisper
 reportlab
+streamlit-mic-recorder

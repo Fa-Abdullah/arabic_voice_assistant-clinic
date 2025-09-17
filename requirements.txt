@@ -1,0 +1,12 @@
+streamlit
+gtts
+openai
+SpeechRecognition
+pydub
+requests
+streamlit-webrtc
+vosk
+requests
+av
+pydub
+openai

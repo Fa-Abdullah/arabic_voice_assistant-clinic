@@ -6,11 +6,6 @@ pydub
 requests
 streamlit-webrtc
 vosk
-requests
 av
-pydub
-openai
-portaudio19-dev -y
-openai-whisper 
-pyttsx3 
+openai-whisper
 reportlab

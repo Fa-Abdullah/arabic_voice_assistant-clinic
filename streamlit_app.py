@@ -5,16 +5,14 @@ import os
 import base64
 import time
 import io
-import sounddevice as sd
 from pathlib import Path
 
 # Core imports
 try:
     from gtts import gTTS
     from openai import OpenAI
-    import speech_recognition as sr
     from pydub import AudioSegment
-    from pydub.playback import play
+    import streamlit_mic_recorder as smr  # لتسجيل الصوت من المتصفح
 except ImportError as e:
     st.error(f"Missing package: {e}")
     st.stop()
@@ -35,6 +33,8 @@ if 'chat_mode' not in st.session_state:
     st.session_state.chat_mode = "hybrid"  # "text", "audio", "hybrid"
 if 'first_message_sent' not in st.session_state:
     st.session_state.first_message_sent = False
+if 'audio_data' not in st.session_state:
+    st.session_state.audio_data = None
 
 # --------- Assistant Class ----------
 class OnlineArabicVoiceAssistant:
@@ -43,7 +43,6 @@ class OnlineArabicVoiceAssistant:
             base_url="https://openrouter.ai/api/v1",
             api_key="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"
         )
-        self.recognizer = sr.Recognizer()
         self.system_prompt = """أنت ساندي، موظفة استقبال في عيادة فانكوفر لطب الأسنان.
 
 المعلومات المهمة:
@@ -60,26 +59,29 @@ class OnlineArabicVoiceAssistant:
 * اجعلي الردود قصيرة وواضحة
 """
 
-    def transcribe_audio_google(self, audio_data, language='ar-SA'):
+    def transcribe_audio_google(self, audio_bytes, language='ar-SA'):
         try:
-            if isinstance(audio_data, str) and audio_data.startswith('data:'):
-                header, encoded = audio_data.split(',', 1)
-                audio_bytes = base64.b64decode(encoded)
-                audio_segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
-            elif isinstance(audio_data, bytes):
-                audio_segment = AudioSegment.from_file(io.BytesIO(audio_data))
-            else:
-                audio_segment = AudioSegment.from_file(audio_data)
-
-            wav_data = audio_segment.export(format="wav").read()
-            audio_source = sr.AudioFile(io.BytesIO(wav_data))
-
-            with audio_source as source:
-                self.recognizer.adjust_for_ambient_noise(source)
-                audio_recorded = self.recognizer.record(source)
-
-            text = self.recognizer.recognize_google(audio_recorded, language=language)
-            return text.strip()
+            # حفظ البيانات الصوتية في ملف مؤقت
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+                tmpfile.write(audio_bytes)
+                tmpfile.flush()
+                
+                # استخدام pydub لتحويل الصوت إلى تنسيق مناسب
+                audio = AudioSegment.from_file(tmpfile.name)
+                audio = audio.set_channels(1).set_frame_rate(16000)
+                
+                # حفظ الصوت المحول
+                converted_audio = io.BytesIO()
+                audio.export(converted_audio, format="wav")
+                converted_audio.seek(0)
+                
+                # استخدام Whisper للتعرف على الكلام
+                transcript = self.openai_client.audio.transcriptions.create(
+                    model="whisper-1", 
+                    file=("audio.wav", converted_audio.read()),
+                    language=language
+                )
+                return transcript.text.strip()
         except Exception as e:
             st.error(f"خطأ في التعرف على الصوت: {str(e)}")
             return ""
@@ -161,40 +163,17 @@ def display_chat_history():
             
             st.divider()
 
-def test_microphone():
-    try:
-        st.info("🎤 اختبار الميكروفون لمدة 3 ثوان...")
-        audio_data = sd.rec(int(3*16000), samplerate=16000, channels=1, dtype='float32')
-        sd.wait()
-        volume = np.abs(audio_data).mean()
-        if volume > 0.001:
-            st.success(f"✅ الميكروفون يعمل! مستوى الصوت: {volume:.4f}")
+def process_recorded_audio(assistant, audio_bytes):
+    if audio_bytes:
+        # عرض مؤشر التحميل أثناء معالجة الصوت
+        with st.spinner("جاري معالجة الصوت..."):
+            text = assistant.transcribe_audio_google(audio_bytes)
+        
+        if text:
+            st.success(f"تم التعرف على النص: {text}")
+            process_user_input(assistant, text, mode="audio")
         else:
-            st.error("❌ لم يتم اكتشاف صوت.")
-    except Exception as e:
-        st.error(f"❌ خطأ في الميكروفون: {e}")
-
-def record_audio(assistant):
-    try:
-        st.info("🎙️ تسجيل الصوت... تحدث الآن (5 ثوان)")
-        audio_data = sd.rec(int(5 * 16000), samplerate=16000, channels=1, dtype='int16')
-        sd.wait()
-        
-        # حفظ الصوت المؤقت
-        temp_audio = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-        import scipy.io.wavfile as wav
-        wav.write(temp_audio.name, 16000, audio_data)
-        
-        # تحويل الصوت إلى نص
-        text = assistant.transcribe_audio_google(temp_audio.name)
-        
-        # تنظيف الملف المؤقت
-        os.unlink(temp_audio.name)
-        
-        return text
-    except Exception as e:
-        st.error(f"❌ خطأ في التسجيل: {e}")
-        return ""
+            st.error("لم يتم التعرف على أي كلام في التسجيل")
 
 # --------- Main App ----------
 def main():
@@ -255,11 +234,21 @@ def main():
         if st.button("📤 إرسال نص"):
             process_user_input(assistant, user_text, mode="text")
         
-        # زر التسجيل الصوتي
-        if st.button("🎙️ تسجيل صوتي") and st.session_state.chat_mode in ["audio", "hybrid"]:
-            recorded_text = record_audio(assistant)
-            if recorded_text:
-                process_user_input(assistant, recorded_text, mode="audio")
+        # تسجيل الصوت من المتصفح
+        st.subheader("🎤 التسجيل الصوتي")
+        st.write("اضغط على الزر للتسجيل ثم توقف عندما تنتهي")
+        
+        # استخدام مكون تسجيل الصوت من streamlit-mic-recorder
+        audio_bytes = None
+        if st.session_state.chat_mode in ["audio", "hybrid"]:
+            audio_bytes = smr.mic_recorder(
+                start_prompt="⏺️ بدء التسجيل",
+                stop_prompt="⏹️ إيقاف التسجيل",
+                key="recorder"
+            )
+            
+            if audio_bytes and audio_bytes.get("bytes"):
+                process_recorded_audio(assistant, audio_bytes["bytes"])
         
         st.divider()
         st.subheader("📋 سجل المحادثة")
@@ -279,11 +268,6 @@ def main():
                 st.text_area("آخر رسالة (ساندي):", value=last_msg['assistant'], height=100, disabled=True)
 
         st.divider()
-        st.subheader("🎤 اختبار الميكروفون")
-        if st.button("تشغيل الاختبار"):
-            test_microphone()
-            
-        st.divider()
         st.subheader("⚙️ إعدادات")
         if st.button("🗑️ مسح المحادثة"):
             st.session_state.chat_history = []
@@ -291,6 +275,14 @@ def main():
             greeting = assistant.generate_greeting()
             st.session_state.chat_history.append({"user": "", "assistant": greeting, "mode": "system"})
             st.rerun()
+            
+        st.info("""
+        **ملاحظات:**
+        - هذا التطبيق يستخدم ميكروفون المتصفح لتسجيل الصوت
+        - للتسجيل، اضغط على زر البدء وتحدث بوضوح
+        - بعد الانتهاء، اضغط على زر الإيقاف
+        - يمكنك التبديل بين أنماط المحادثة حسب تفضيلك
+        """)
 
 if __name__ == "__main__":
     main()

@@ -10,3 +10,7 @@ requests
 av
 pydub
 openai
+portaudio19-dev -y
+openai-whisper 
+pyttsx3 
+reportlab

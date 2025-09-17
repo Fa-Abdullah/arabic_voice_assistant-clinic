@@ -13,7 +13,7 @@ from pathlib import Path
 try:
   from gtts import gTTS
   from openai import OpenAI
-  import speech\_recognition as sr
+  import speech_recognition as sr
   from pydub import AudioSegment
 except ImportError as e:
   st.error(f"Missing package: {e}")

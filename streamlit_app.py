@@ -1,6 +1,7 @@
 """
 Arabic Voice Assistant - Streamlit Web Version
-باستخدام الميكروفون من المتصفح (streamlit-webrtc)
+🎤 باستخدام الميكروفون من المتصفح (streamlit-webrtc)
+⬇️ مع تنزيل نموذج Vosk العربي تلقائيًا
 """
 
 import streamlit as st
@@ -10,13 +11,15 @@ import tempfile
 import os
 import base64
 import json
-import time
-
+import zipfile
+import urllib.request
 from pathlib import Path
+
 from vosk import Model, KaldiRecognizer
 from gtts import gTTS
 from openai import OpenAI
 from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
+
 
 # ---------------- إعداد الصفحة ----------------
 st.set_page_config(
@@ -30,8 +33,24 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "assistant_ready" not in st.session_state:
     st.session_state.assistant_ready = False
-if "first_message_sent" not in st.session_state:
-    st.session_state.first_message_sent = False
+
+
+# ---------------- تحميل نموذج Vosk العربي ----------------
+def download_vosk_model():
+    model_dir = Path("vosk-model-small-ar-0.22")
+    if not model_dir.exists():
+        url = "https://alphacephei.com/vosk/models/vosk-model-small-ar-0.22.zip"
+        zip_path = "vosk-model-small-ar-0.22.zip"
+
+        st.info("⬇️ جاري تحميل نموذج Vosk العربي (قد يستغرق دقيقة)...")
+        urllib.request.urlretrieve(url, zip_path)
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            zip_ref.extractall(".")
+
+        os.remove(zip_path)
+
+    return str(model_dir)
 
 
 # ---------------- المساعد ----------------
@@ -61,23 +80,12 @@ class ArabicVoiceAssistant:
 5. عند حجز المواعيد، اطلبي اسم المريض ونوع الخدمة المطلوبة
 """
 
-    def find_and_load_model(self):
+    def load_model(self):
         try:
-            search_paths = [Path.cwd(), Path.home() / "Downloads"]
-            for search_dir in search_paths:
-                if not search_dir.exists():
-                    continue
-                for item in search_dir.iterdir():
-                    if (
-                        item.is_dir()
-                        and "vosk" in item.name.lower()
-                        and "ar" in item.name.lower()
-                    ):
-                        if (item / "am").exists() and (item / "graph").exists():
-                            self.model = Model(str(item))
-                            self.rec = KaldiRecognizer(self.model, self.sample_rate)
-                            return True, f"✅ تم تحميل النموذج من: {item.name}"
-            return False, "❌ لم يتم العثور على نموذج Vosk العربي"
+            model_path = download_vosk_model()
+            self.model = Model(model_path)
+            self.rec = KaldiRecognizer(self.model, self.sample_rate)
+            return True, f"✅ تم تحميل النموذج من: {model_path}"
         except Exception as e:
             return False, f"❌ خطأ في تحميل النموذج: {e}"
 
@@ -157,14 +165,14 @@ class AudioProcessor(AudioProcessorBase):
 # ---------------- واجهة التطبيق ----------------
 st.title("🦷 عيادة فانكوفر لطب الأسنان")
 st.markdown("### 🤖 ساندي - المساعدة الذكية")
-st.info("يمكنك التحدث بالعربية مباشرة من مايكروفون المتصفح 🎤")
+st.info("🎤 تحدث بالعربية مباشرة من مايكروفون المتصفح")
 
 assistant = get_assistant()
 
 # تحميل النموذج
 if not st.session_state.assistant_ready:
     with st.spinner("🔄 تحميل نموذج Vosk..."):
-        success, message = assistant.find_and_load_model()
+        success, message = assistant.load_model()
         if success:
             st.success(message)
             st.session_state.assistant_ready = True
@@ -201,7 +209,6 @@ if ctx and ctx.audio_processor:
                     st.audio(audio_file, format="audio/mp3")
         else:
             st.warning("⚠️ لم يتم تسجيل أي صوت.")
-
 
 # ---------------- سجل المحادثة ----------------
 st.subheader("📋 سجل المحادثة")
